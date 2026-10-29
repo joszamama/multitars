@@ -213,7 +213,11 @@ async function decodeHeader(
 ): Promise<TarHeader | undefined> {
   let buffer: Uint8Array | null;
   let header = initTarHeader(gax);
-  while ((buffer = await reader.read()) && checkMagic(buffer)) {
+  // v7 headers have no magic, so a valid checksum is accepted instead
+  while (
+    (buffer = await reader.read()) &&
+    (checkMagic(buffer) || checkChecksum(buffer))
+  ) {
     if (buffer.byteLength !== reader.blockSize) {
       throw new Error('Invalid Tar: Unexpected EOF while reading header');
     }

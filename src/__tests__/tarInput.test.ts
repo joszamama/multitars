@@ -289,6 +289,35 @@ describe('untar', () => {
     expect(entries).toEqual([{ mode: 0o755, uid: 17, uname: 'user' }]);
   });
 
+  it('extracts entries with v7 headers', async () => {
+    const archive = Buffer.from(
+      await new Response(
+        iterableToStream(
+          tar([TarFile.from(new Blob(['x']).stream(), 'a.txt', { size: 1 })])
+        )
+      ).arrayBuffer()
+    );
+
+    const header = archive.subarray(0, 512);
+    header.fill(0, 257);
+    header[156] = 0;
+    patchHeader(header);
+
+    const entries: { name: string; text: string }[] = [];
+    for await (const entry of untar(new Blob([archive]).stream())) {
+      entries.push({ name: entry.name, text: await entry.text() });
+    }
+
+    expect(entries).toEqual([{ name: 'a.txt', text: 'x' }]);
+
+    header[0]++;
+    await expect(async () => {
+      for await (const entry of untar(new Blob([archive]).stream())) {
+        await entry.text();
+      }
+    }).rejects.toThrow(/non-header block/);
+  });
+
   it('extract a tarball successfully (unchunked)', async () => {
     const entries: any[] = [];
 
