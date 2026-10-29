@@ -228,6 +228,67 @@ describe('untar', () => {
     expect(entries).toEqual([name]);
   });
 
+  it('does not apply the prefix of a PAX header block to the next entry', async () => {
+    const pax = new Blob(['10 uid=17\n']);
+    const archive = Buffer.from(
+      await new Response(
+        iterableToStream(
+          tar([
+            TarFile.from(pax.stream(), 'PaxHeader/file.txt', {
+              size: pax.size,
+            }),
+            TarFile.from(new Blob(['a']).stream(), 'file.txt', { size: 1 }),
+          ])
+        )
+      ).arrayBuffer()
+    );
+
+    const paxHeader = archive.subarray(0, 512);
+    paxHeader[156] = 'x'.charCodeAt(0);
+    paxHeader.write('dir', 345, 'ascii');
+    patchHeader(paxHeader);
+
+    const entries: string[] = [];
+    for await (const entry of untar(new Blob([archive]).stream())) {
+      entries.push(entry.name);
+      await entry.text();
+    }
+
+    expect(entries).toEqual(['file.txt']);
+  });
+
+  it('does not apply the fields of a PAX header block to the next entry', async () => {
+    const pax = new Blob(['10 uid=17\n']);
+    const archive = Buffer.from(
+      await new Response(
+        iterableToStream(
+          tar([
+            TarFile.from(pax.stream(), 'PaxHeader/run.sh', { size: pax.size }),
+            TarFile.from(new Blob(['a']).stream(), 'run.sh', { size: 1 }),
+          ])
+        )
+      ).arrayBuffer()
+    );
+
+    const paxHeader = archive.subarray(0, 512);
+    paxHeader[156] = 'x'.charCodeAt(0);
+    paxHeader.write('0000644\0', 100, 'ascii');
+    paxHeader.write('root', 265, 'ascii');
+    patchHeader(paxHeader);
+    const header = archive.subarray(1024, 1536);
+    header.write('0000755\0', 100, 'ascii');
+    header.write('user', 265, 'ascii');
+    patchHeader(header);
+
+    const entries: { mode: number; uid: number; uname: string | null }[] = [];
+    for await (const entry of untar(new Blob([archive]).stream())) {
+      entries.push({ mode: entry.mode, uid: entry.uid, uname: entry.uname });
+      await entry.text();
+    }
+
+    expect(entries).toEqual([{ mode: 0o755, uid: 17, uname: 'user' }]);
+  });
+
   it('extract a tarball successfully (unchunked)', async () => {
     const entries: any[] = [];
 
